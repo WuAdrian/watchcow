@@ -275,4 +275,4 @@ APP_IS_DISPLAY=false
 - [fnOS 应用规范](https://docs.fnnas.com)
 - [Docker Compose 文档](https://docs.docker.com/compose/)
 - [Docker Compose 环境变量](https://docs.docker.com/compose/environment-variables/)
-- [WatchCow 项目主页](https://github.com/xiaxilin/watchcow)
+- [WatchCow 项目主页](https://github.com/tf4fun/watchcow)

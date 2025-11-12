@@ -98,7 +98,7 @@ WatchCow 是一个针对飞牛OS设计的轻量级Docker容器管理增强工具
 1. **克隆项目**
 
 ```bash
-git clone https://github.com/xiaxilin/watchcow.git
+git clone https://github.com/tf4fun/watchcow.git
 cd watchcow
 ```
 
@@ -235,15 +235,9 @@ WatchCow 需要以下特殊权限和挂载：
 ```yaml
 services:
   watchcow:
-    privileged: true           # eBPF 需要特权模式
+    privileged: true           # eBPF 需要特权模式（已包含所有必要权限）
     network_mode: host         # 访问宿主机网络和 Unix socket
     pid: host                  # 查看所有进程（包括 trim_sac）
-
-    cap_add:                   # 最小权限集
-      - SYS_ADMIN             # eBPF 系统调用
-      - SYS_RESOURCE          # 资源限制调整
-      - NET_ADMIN             # 网络操作
-      - BPF                   # eBPF 操作
 
     volumes:
       - /sys/kernel/debug:/sys/kernel/debug:ro        # Tracepoint 访问
@@ -461,17 +455,28 @@ MIT License - 查看 [LICENSE](LICENSE) 文件了解详情
 
 ## 📮 联系方式
 
-- **Issues**: [GitHub Issues](https://github.com/xiaxilin/watchcow/issues)
-- **讨论**: [GitHub Discussions](https://github.com/xiaxilin/watchcow/discussions)
+- **Issues**: [GitHub Issues](https://github.com/tf4fun/watchcow/issues)
+- **讨论**: [GitHub Discussions](https://github.com/tf4fun/watchcow/discussions)
 
-## 🗺️ 路线图
+## ⚠️ 重要说明
 
-- [ ] 支持 Podman 容器
-- [ ] 提供 Web UI 管理界面
-- [ ] 支持容器分组和批量操作
-- [ ] 添加容器资源监控
-- [ ] 支持自定义 Webhook 通知
-- [ ] 提供 Helm Chart 部署方式
+### 功能限制
+
+**⚠️ 暂不支持 FN Connect 集成**
+
+WatchCow 目前仅在内网环境下工作，注册的 Docker 容器应用**无法通过 FN Connect 在外网访问**。这是因为：
+
+- WatchCow 注入的应用信息仅存在于飞牛OS本地进程内存中
+- FN Connect 云端服务无法获取这些动态注入的应用数据
+- 外网访问需要应用在飞牛OS应用商店中正式注册
+
+### 支持本项目
+
+如果你喜欢这个方案，希望飞牛OS官方能够集成类似功能，欢迎前往官方论坛跟帖支持：
+
+🔗 **[飞牛OS论坛 - Docker 桌面图标支持讨论帖](https://club.fnnas.com/forum.php?mod=viewthread&tid=39477)**
+
+你的支持可能会推动官方将此功能集成到未来的飞牛OS版本中！
 
 ---
 

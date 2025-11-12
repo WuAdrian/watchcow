@@ -1,7 +1,7 @@
 services:
   watchcow:
     build: .
-    image: watchcow:v45
+    image: watchcow:latest
     container_name: watchcow
 
     # Privileged mode - required for eBPF
@@ -12,13 +12,6 @@ services:
 
     # Host PID namespace - see all processes including trim_sac
     pid: host
-
-    # Required for eBPF
-    cap_add:
-      - SYS_ADMIN
-      - SYS_RESOURCE
-      - NET_ADMIN
-      - BPF
 
     # Required volumes
     volumes:
