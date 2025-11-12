@@ -5,6 +5,7 @@ services:
     command: sleep infinity
     network_mode: bridge
     restart: unless-stopped
+    stop_signal: SIGKILL  # 立即强制停止
 
     labels:
       # Enable WatchCow discovery
