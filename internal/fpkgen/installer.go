@@ -5,7 +5,6 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 )
 
@@ -187,14 +186,4 @@ func (i *Installer) IsAppInstalled(appName string) bool {
 	}
 
 	return false
-}
-
-// CleanupAppDir removes the generated app directory
-func CleanupAppDir(appDir string) error {
-	return os.RemoveAll(appDir)
-}
-
-// GetAppDir returns the path where the app directory would be created
-func GetAppDir(outputDir, appName string) string {
-	return filepath.Join(outputDir, appName)
 }

@@ -11,14 +11,8 @@ import (
 	"watchcow/internal/docker"
 )
 
-const (
-	// Default output directory for generated fnOS app packages
-	defaultOutputDir = "/tmp/watchcow-apps"
-)
-
 func main() {
 	// Parse command line flags
-	outputDir := flag.String("output", defaultOutputDir, "Output directory for generated fnOS app packages")
 	debug := flag.Bool("debug", false, "Enable debug mode")
 	flag.Parse()
 
@@ -39,9 +33,6 @@ func main() {
 
 	slog.Info("WatchCow - fnOS App Generator for Docker")
 	slog.Info("========================================")
-	slog.Info("Configuration",
-		"outputDir", *outputDir,
-		"debug", *debug)
 
 	// Create context with signal handling
 	ctx, cancel := context.WithCancel(context.Background())
@@ -52,7 +43,7 @@ func main() {
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 
 	// Create and start Docker monitor
-	monitor, err := docker.NewMonitor(*outputDir)
+	monitor, err := docker.NewMonitor()
 	if err != nil {
 		slog.Error("Failed to create Docker monitor", "error", err)
 		os.Exit(1)
@@ -68,9 +59,6 @@ func main() {
 	slog.Info("  watchcow.enable: \"true\"")
 	slog.Info("  watchcow.display_name: \"Your App Name\"")
 	slog.Info("  watchcow.service_port: \"8080\"")
-	slog.Info("")
-	slog.Info("Optional labels (following fnOS manifest conventions):")
-	slog.Info("  watchcow.appname, watchcow.version, watchcow.desc, watchcow.maintainer")
 	slog.Info("")
 
 	// Wait for shutdown signal

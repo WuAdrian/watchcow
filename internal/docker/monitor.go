@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -29,7 +30,6 @@ type Monitor struct {
 	cli       *client.Client
 	generator *fpkgen.Generator
 	installer *fpkgen.Installer
-	outputDir string
 	stopCh    chan struct{}
 
 	// Track container states
@@ -50,7 +50,7 @@ type ContainerState struct {
 }
 
 // NewMonitor creates a new Docker monitor
-func NewMonitor(outputDir string) (*Monitor, error) {
+func NewMonitor() (*Monitor, error) {
 	// Connect to Docker daemon
 	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
 	if err != nil {
@@ -58,7 +58,7 @@ func NewMonitor(outputDir string) (*Monitor, error) {
 	}
 
 	// Create generator
-	generator, err := fpkgen.NewGenerator(outputDir)
+	generator, err := fpkgen.NewGenerator()
 	if err != nil {
 		cli.Close()
 		return nil, fmt.Errorf("failed to create generator: %w", err)
@@ -77,7 +77,6 @@ func NewMonitor(outputDir string) (*Monitor, error) {
 		cli:        cli,
 		generator:  generator,
 		installer:  installer,
-		outputDir:  outputDir,
 		stopCh:     make(chan struct{}),
 		containers: make(map[string]*ContainerState),
 		opQueue:    make(chan *AppOperation, 100),
@@ -98,6 +97,8 @@ func (m *Monitor) runOperationWorker(ctx context.Context) {
 			case "install":
 				slog.Info("Installing fnOS app", "app", op.AppName)
 				err = m.installer.InstallLocal(op.AppDir)
+				// Clean up temp directory after install (success or fail)
+				os.RemoveAll(op.AppDir)
 			case "stop":
 				slog.Info("Stopping fnOS app", "app", op.AppName)
 				err = m.installer.StopApp(op.AppName)
@@ -129,7 +130,7 @@ func (m *Monitor) queueOperation(opType, appName, appDir string) error {
 
 // Start starts monitoring Docker containers
 func (m *Monitor) Start(ctx context.Context) {
-	slog.Info("Starting Docker monitor...", "outputDir", m.outputDir)
+	slog.Info("Starting Docker monitor...")
 
 	// Start operation worker for serializing appcenter-cli calls
 	if m.installer != nil {
@@ -310,12 +311,6 @@ func (m *Monitor) handleContainerDestroy(ctx context.Context, containerID, conta
 		if err := m.queueOperation("uninstall", state.AppName, ""); err != nil {
 			slog.Warn("Failed to uninstall fnOS app", "app", state.AppName, "error", err)
 		}
-	}
-
-	// Clean up generated directory
-	appDir := fpkgen.GetAppDir(m.outputDir, state.AppName)
-	if err := fpkgen.CleanupAppDir(appDir); err != nil {
-		slog.Warn("Failed to cleanup app directory", "appDir", appDir, "error", err)
 	}
 
 	// Remove from tracking

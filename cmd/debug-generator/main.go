@@ -74,12 +74,18 @@ func main() {
 	fmt.Println()
 
 	// Create generator (uses template engine internally)
-	generator, err := fpkgen.NewGenerator(*outputDir)
+	generator, err := fpkgen.NewGenerator()
 	if err != nil {
 		slog.Error("Failed to create generator", "error", err)
 		os.Exit(1)
 	}
 	defer generator.Close()
+
+	// Ensure output directory exists
+	if err := os.MkdirAll(*outputDir, 0755); err != nil {
+		slog.Error("Failed to create output directory", "error", err)
+		os.Exit(1)
+	}
 
 	// Generate using template engine
 	if err := generator.GenerateFromConfig(config, *outputDir); err != nil {

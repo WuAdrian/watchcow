@@ -15,7 +15,6 @@ import (
 
 // Generator handles fnOS application package generation from Docker containers
 type Generator struct {
-	outputDir      string                // Base output directory for generated apps
 	dockerClient   *client.Client        // Docker API client
 	templateEngine *TemplateEngine       // Template engine for rendering
 	installed      map[string]*AppConfig // map[containerID]AppConfig - installed apps
@@ -23,7 +22,7 @@ type Generator struct {
 }
 
 // NewGenerator creates a new application generator
-func NewGenerator(outputDir string) (*Generator, error) {
+func NewGenerator() (*Generator, error) {
 	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
 	if err != nil {
 		return nil, fmt.Errorf("failed to create Docker client: %w", err)
@@ -36,14 +35,7 @@ func NewGenerator(outputDir string) (*Generator, error) {
 		return nil, fmt.Errorf("failed to create template engine: %w", err)
 	}
 
-	// Ensure output directory exists
-	if err := os.MkdirAll(outputDir, 0755); err != nil {
-		cli.Close()
-		return nil, fmt.Errorf("failed to create output directory: %w", err)
-	}
-
 	return &Generator{
-		outputDir:      outputDir,
 		dockerClient:   cli,
 		templateEngine: tmplEngine,
 		installed:      make(map[string]*AppConfig),
@@ -51,6 +43,7 @@ func NewGenerator(outputDir string) (*Generator, error) {
 }
 
 // GenerateFromContainer creates fnOS app structure from a running container
+// Returns the config, temp directory path (caller should clean up after install)
 func (g *Generator) GenerateFromContainer(ctx context.Context, containerID string) (*AppConfig, string, error) {
 	// 1. Inspect container for full details
 	container, err := g.dockerClient.ContainerInspect(ctx, containerID)
@@ -61,15 +54,14 @@ func (g *Generator) GenerateFromContainer(ctx context.Context, containerID strin
 	// 2. Extract configuration from container
 	config := g.extractConfig(&container)
 
-	// 3. Create application directory
-	appDir := filepath.Join(g.outputDir, config.AppName)
-
-	// Remove existing directory if exists
-	if err := os.RemoveAll(appDir); err != nil {
-		return nil, "", fmt.Errorf("failed to remove existing directory: %w", err)
+	// 3. Create temp directory for app package
+	appDir, err := os.MkdirTemp("", "watchcow-"+config.AppName+"-")
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to create temp directory: %w", err)
 	}
 
 	if err := g.createDirectoryStructure(appDir); err != nil {
+		os.RemoveAll(appDir)
 		return nil, "", fmt.Errorf("failed to create directory structure: %w", err)
 	}
 

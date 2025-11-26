@@ -3,12 +3,8 @@
 LOG_FILE="${TRIM_PKGVAR}/info.log"
 PID_FILE="${TRIM_PKGVAR}/app.pid"
 
-# WatchCow binary and output directory
-OUTPUT_DIR="${TRIM_PKGVAR}/generated-apps"
-CMD="${TRIM_APPDEST}/watchcow --output ${OUTPUT_DIR}"
-
-# Ensure output directory exists
-mkdir -p "${OUTPUT_DIR}"
+# WatchCow binary
+CMD="${TRIM_APPDEST}/watchcow"
 
 log_msg() {
     echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" >> ${LOG_FILE}
