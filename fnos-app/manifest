@@ -1,0 +1,11 @@
+appname      = watchcow
+version      = 1.0.0
+display_name = WatchCow
+desc         = Docker 容器自动转换为 fnOS 应用 - 监控 Docker 容器并自动生成官方 fnOS 应用包
+arch         = x86_64
+source       = thirdparty
+maintainer   = WatchCow
+distributor  = WatchCow
+
+ctl_stop     = true
+checkport    = false

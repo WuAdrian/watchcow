@@ -9,12 +9,17 @@ import (
 	"syscall"
 
 	"watchcow/internal/docker"
-	"watchcow/internal/ebpf"
+)
+
+const (
+	// Default output directory for generated fnOS app packages
+	defaultOutputDir = "/tmp/watchcow-apps"
 )
 
 func main() {
 	// Parse command line flags
-	debug := flag.Bool("debug", false, "Enable debug mode (print hex dump of all packets)")
+	outputDir := flag.String("output", defaultOutputDir, "Output directory for generated fnOS app packages")
+	debug := flag.Bool("debug", false, "Enable debug mode")
 	flag.Parse()
 
 	// Configure slog
@@ -25,7 +30,6 @@ func main() {
 		logLevel = slog.LevelInfo
 	}
 
-	// Use text handler with time and level
 	opts := &slog.HandlerOptions{
 		Level: logLevel,
 	}
@@ -33,11 +37,11 @@ func main() {
 	logger := slog.New(handler)
 	slog.SetDefault(logger)
 
-	slog.Info("🚀 WatchCow - Docker Injector for fnOS")
+	slog.Info("WatchCow - fnOS App Generator for Docker")
 	slog.Info("========================================")
-	if *debug {
-		slog.Info("🔍 Debug mode enabled")
-	}
+	slog.Info("Configuration",
+		"outputDir", *outputDir,
+		"debug", *debug)
 
 	// Create context with signal handling
 	ctx, cancel := context.WithCancel(context.Background())
@@ -47,51 +51,29 @@ func main() {
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 
-	// Create and initialize eBPF manager
-	manager, err := ebpf.NewManager()
-	if err != nil {
-		slog.Error("Failed to create eBPF manager", "error", err)
-		os.Exit(1)
-	}
-	defer manager.Stop()
-
-	// Set debug mode
-	manager.SetDebug(*debug)
-
-	// Start Docker app update listener
-	manager.StartDockerAppListener()
-
 	// Create and start Docker monitor
-	dockerMonitor, err := docker.NewMonitor(
-		manager.GetDockerAppUpdateChannel(),
-		manager.GetInterceptor(),
-	)
+	monitor, err := docker.NewMonitor(*outputDir)
 	if err != nil {
-		slog.Warn("Failed to create Docker monitor", "error", err)
-		slog.Warn("Continuing without Docker monitoring...")
-	} else {
-		go dockerMonitor.Start(ctx)
-		defer dockerMonitor.Stop()
-	}
-
-	// Load and attach eBPF programs
-	if err := manager.LoadAndAttach(); err != nil {
-		slog.Error("Failed to load eBPF programs", "error", err)
+		slog.Error("Failed to create Docker monitor", "error", err)
 		os.Exit(1)
 	}
+	defer monitor.Stop()
 
-	slog.Info("✅ eBPF programs loaded successfully")
+	// Start monitoring
+	go monitor.Start(ctx)
 
-	// Start event processing
-	if err := manager.Start(ctx); err != nil {
-		slog.Error("Failed to start event processing", "error", err)
-		os.Exit(1)
-	}
-
-	slog.Info("✅ Monitoring started (Press Ctrl+C to stop)")
+	slog.Info("Monitoring started (Press Ctrl+C to stop)")
+	slog.Info("")
+	slog.Info("To enable fnOS app generation for a container, add these labels:")
+	slog.Info("  watchcow.enable: \"true\"")
+	slog.Info("  watchcow.display_name: \"Your App Name\"")
+	slog.Info("  watchcow.service_port: \"8080\"")
+	slog.Info("")
+	slog.Info("Optional labels (following fnOS manifest conventions):")
+	slog.Info("  watchcow.appname, watchcow.version, watchcow.desc, watchcow.maintainer")
 	slog.Info("")
 
 	// Wait for shutdown signal
 	<-sigChan
-	slog.Info("\n🛑 Shutting down...")
+	slog.Info("Shutting down...")
 }

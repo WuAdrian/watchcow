@@ -1,0 +1,16 @@
+appname={{.AppName}}
+version={{.Version}}
+display_name={{.DisplayName}}
+desc={{.Description}}
+arch=x86_64
+source=thirdparty
+maintainer={{.Maintainer}}
+distributor={{.Maintainer}}
+os_min_version=0.9.0
+install_type=root
+desktop_uidir=ui
+desktop_applaunchname={{.AppName}}.Application
+{{- if .Port}}
+service_port={{.Port}}
+checkport=false
+{{- end}}

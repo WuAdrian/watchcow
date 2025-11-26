@@ -18,17 +18,16 @@
 # Go workspace file
 go.work
 
-# bpf2go generated files
-internal/ebpf/bpf_bpfel.go
-internal/ebpf/bpf_bpfel.o
-internal/ebpf/bpf_bpfeb.go
-internal/ebpf/bpf_bpfeb.o
-
 # Compiled binaries
 /watchcow
+/debug-generator
 
-# Docker artifacts
-watchcow.tar.gz
+# Build output
+/build/
+
+# fnOS app binary (generated during build)
+/fnos-app/app/watchcow
+/fnos-app/*.fpk
 
 # IDE
 .vscode/
@@ -37,11 +36,13 @@ watchcow.tar.gz
 *.tmp
 *.bak
 *~
+.DS_Store
 
 # Logs
 *.log
 /logs/
 /data/
+
 # User configuration overrides
 **/.env
 !**/.env.example

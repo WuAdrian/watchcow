@@ -1,60 +1,72 @@
-name: ci
+name: Build fnOS Package
 
 on:
   push:
     branches:
       - main
-      - 'dev-*'
+      - 'dev_*'
     tags:
       - 'v*.*.*'
+  pull_request:
+    branches:
+      - main
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      -
-        name: Checkout
+      - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
         with:
-          submodules: recursive
+          go-version: '1.22'
 
-      -
-        name: Docker meta
-        id: meta
-        uses: docker/metadata-action@v5
+      - name: Build binary
+        run: |
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "-s -w" -o fnos-app/app/watchcow ./cmd/watchcow
+          chmod +x fnos-app/app/watchcow
+          chmod +x fnos-app/cmd/*
+
+      - name: Download fnpack
+        run: |
+          curl -L -o /tmp/fnpack https://static2.fnnas.com/fnpack/fnpack-1.0.4-linux-amd64
+          chmod +x /tmp/fnpack
+
+      - name: Build fpk package
+        run: |
+          cd fnos-app
+          /tmp/fnpack build
+          mv watchcow.fpk ../
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
         with:
-          images: ${{ secrets.REGISTRY }}/${{ secrets.REGISTRY_IMAGE }}
-          tags: |
-            type=raw,enable=${{ startsWith(github.ref, 'refs/tags/v') }},value=latest
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=raw,enable=${{ startsWith(github.ref, 'refs/tags/v') }},value=release-{{sha}}
-            type=ref,event=branch,enable=${{ startsWith(github.ref, 'refs/heads/dev-') }}
-            type=ref,event=branch,enable=${{ startsWith(github.ref, 'refs/heads/dev-') }},suffix=-{{sha}}
-            type=raw,enable=${{ github.ref == 'refs/heads/main' }},value=next
-            type=raw,enable=${{ github.ref == 'refs/heads/main' }},value=next-{{sha}}
+          name: watchcow-fpk
+          path: watchcow.fpk
 
-      -
-        name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-
-      -
-        name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      -
-        name: Login to Registry
-        uses: docker/login-action@v3
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download artifact
+        uses: actions/download-artifact@v4
         with:
-          registry: ${{ secrets.REGISTRY }}
-          username: ${{ secrets.REGISTRY_USER }}
-          password: ${{ secrets.REGISTRY_PASSWD }}
+          name: watchcow-fpk
 
-      -
-        name: Build and push
-        uses: docker/build-push-action@v6
+      - name: Get version
+        id: version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+      - name: Rename with version
+        run: mv watchcow.fpk watchcow-${{ steps.version.outputs.VERSION }}.fpk
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
         with:
-          push: true
-          platforms: linux/amd64
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          files: watchcow-${{ steps.version.outputs.VERSION }}.fpk
+          generate_release_notes: true
