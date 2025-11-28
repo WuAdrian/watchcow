@@ -1,45 +1,29 @@
 services:
   nginx:
     image: nginx:alpine
-    container_name: nginx
-    network_mode: bridge
-
-    # Optional: Load custom configuration from .env file
-    # Create .env to override any default values below
-    env_file:
-      - path: ./.env
-        required: false     # Optional, won't fail if missing
-
-    # Expose port (can be overridden with APP_PORT in .env)
+    container_name: nginx-demo
     ports:
-      - "${APP_PORT:-8080}:80"
-
-    # WatchCow metadata labels
-    # Default values are defined below with ${VAR:-default} syntax
-    # To customize: create .env file with variables like APP_TITLE=My Custom Title
-    labels:
-      # Required: Basic app information
-      watchcow.enable: "true"
-      watchcow.appName: "${APP_NAME:-nginx}"
-      watchcow.appID: "${APP_ID:-1001}"
-      watchcow.entryName: "${APP_ENTRY_NAME:-nginx}"
-
-      # Display information
-      watchcow.title: "${APP_TITLE:-Nginx}"
-      watchcow.desc: "${APP_DESC:-Nginx Web 服务器示例应用}"
-      watchcow.icon: "${APP_ICON:-https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/nginx.png}"
-      watchcow.category: "${APP_CATEGORY:-开发工具}"
-
-      # Network configuration
-      watchcow.protocol: "${APP_PROTOCOL:-http}"
-      watchcow.port: "${APP_PORT:-8080}"
-      watchcow.path: "${APP_PATH:-/}"
-      watchcow.fnDomain: "${APP_FN_DOMAIN:-nginx}"
-
-      # App type flags
-      watchcow.microApp: "${APP_MICRO_APP:-false}"
-      watchcow.nativeApp: "${APP_NATIVE_APP:-false}"
-      watchcow.isDisplay: "${APP_IS_DISPLAY:-true}"
-
-    # Auto restart
+      - "8080:80"
     restart: unless-stopped
+
+    labels:
+      # 启用 WatchCow 发现
+      watchcow.enable: "true"
+
+      # 应用标识 (对应 manifest.appname)
+      watchcow.appname: "watchcow.nginx"
+
+      # 显示信息 (对应 manifest 字段)
+      watchcow.display_name: "Nginx"
+      watchcow.desc: "高性能 Web 服务器"
+      watchcow.version: "1.0.0"
+      watchcow.maintainer: "WatchCow"
+
+      # 网络配置
+      watchcow.service_port: "8080"
+      watchcow.protocol: "http"
+      watchcow.path: "/"
+
+      # UI 配置
+      watchcow.ui_type: "url"  # url=新标签页, iframe=桌面窗口
+      watchcow.icon: "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/nginx.png"

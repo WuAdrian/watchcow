@@ -3,9 +3,10 @@ package docker
 import (
 	"context"
 	"fmt"
-	"log"
-	"strconv"
+	"log/slog"
+	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/docker/docker/api/types/container"
@@ -13,58 +14,142 @@ import (
 	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/client"
 
-	"watchcow/internal/interceptor"
+	"watchcow/internal/fpkgen"
 )
 
-// Monitor watches Docker containers and converts them to app list
-type Monitor struct {
-	cli          *client.Client
-	interceptor  Interceptor // Interface for sending notifications
-	updateCh     chan<- []interceptor.AppInfo
-	stopCh       chan struct{}
-	pollInterval time.Duration
-
-	// Track previous state to detect changes
-	previousContainers map[string]string // map[containerID]containerName
+// AppOperation represents an appcenter-cli operation
+type AppOperation struct {
+	Type     string // "install", "stop", "uninstall"
+	AppName  string
+	AppDir   string
+	ResultCh chan error
 }
 
-// Interceptor interface for sending notifications
-type Interceptor interface {
-	SendContainerNotification(containerName string, state string) error
+// Monitor watches Docker containers and manages fnOS app installation
+type Monitor struct {
+	cli       *client.Client
+	generator *fpkgen.Generator
+	installer *fpkgen.Installer
+	stopCh    chan struct{}
+
+	// Track container states
+	containers map[string]*ContainerState // map[containerID]state
+	mu         sync.RWMutex
+
+	// Operation queue for serializing appcenter-cli calls
+	opQueue chan *AppOperation
+}
+
+// ContainerState tracks the state of a monitored container
+type ContainerState struct {
+	ContainerID   string
+	ContainerName string
+	AppName       string
+	Installed     bool
+	Labels        map[string]string
 }
 
 // NewMonitor creates a new Docker monitor
-func NewMonitor(updateCh chan<- []interceptor.AppInfo, intcpt Interceptor) (*Monitor, error) {
+func NewMonitor() (*Monitor, error) {
 	// Connect to Docker daemon
 	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
 	if err != nil {
 		return nil, fmt.Errorf("failed to create Docker client: %w", err)
 	}
 
+	// Create generator
+	generator, err := fpkgen.NewGenerator()
+	if err != nil {
+		cli.Close()
+		return nil, fmt.Errorf("failed to create generator: %w", err)
+	}
+
+	// Try to create installer (may fail if appcenter-cli not available)
+	installer, err := fpkgen.NewInstaller()
+	if err != nil {
+		slog.Warn("appcenter-cli not available, will only generate app packages", "error", err)
+		// Continue without installer - useful for development/testing
+	} else {
+		slog.Info("Installer ready, apps will be auto-installed via appcenter-cli")
+	}
+
 	return &Monitor{
-		cli:                cli,
-		interceptor:        intcpt,
-		updateCh:           updateCh,
-		stopCh:             make(chan struct{}),
-		pollInterval:       10 * time.Second, // Poll every 10 seconds
-		previousContainers: make(map[string]string),
+		cli:        cli,
+		generator:  generator,
+		installer:  installer,
+		stopCh:     make(chan struct{}),
+		containers: make(map[string]*ContainerState),
+		opQueue:    make(chan *AppOperation, 100),
 	}, nil
+}
+
+// runOperationWorker processes appcenter-cli operations sequentially
+func (m *Monitor) runOperationWorker(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-m.stopCh:
+			return
+		case op := <-m.opQueue:
+			var err error
+			switch op.Type {
+			case "install":
+				slog.Info("Installing fnOS app", "app", op.AppName)
+				err = m.installer.InstallLocal(op.AppDir)
+				// Clean up temp directory after install (success or fail)
+				os.RemoveAll(op.AppDir)
+			case "start":
+				slog.Info("Starting fnOS app", "app", op.AppName)
+				err = m.installer.StartApp(op.AppName)
+			case "stop":
+				slog.Info("Stopping fnOS app", "app", op.AppName)
+				err = m.installer.StopApp(op.AppName)
+			case "uninstall":
+				slog.Info("Uninstalling fnOS app", "app", op.AppName)
+				err = m.installer.Uninstall(op.AppName)
+			}
+			if op.ResultCh != nil {
+				op.ResultCh <- err
+			}
+		}
+	}
+}
+
+// queueOperation sends an operation to the worker and waits for result
+func (m *Monitor) queueOperation(opType, appName, appDir string) error {
+	if m.installer == nil {
+		return nil
+	}
+	resultCh := make(chan error, 1)
+	m.opQueue <- &AppOperation{
+		Type:     opType,
+		AppName:  appName,
+		AppDir:   appDir,
+		ResultCh: resultCh,
+	}
+	return <-resultCh
 }
 
 // Start starts monitoring Docker containers
 func (m *Monitor) Start(ctx context.Context) {
-	log.Println("🐳 Starting Docker monitor...")
+	slog.Info("Starting Docker monitor...")
 
-	// Initial scan to get current state
+	// Start operation worker for serializing appcenter-cli calls
+	if m.installer != nil {
+		go m.runOperationWorker(ctx)
+	}
+
+	// Initial scan to process existing containers
 	m.scanContainers(ctx)
 
 	// Start listening to Docker events for real-time updates
 	go m.listenToDockerEvents(ctx)
 }
 
-// listenToDockerEvents listens to Docker daemon events for real-time updates
+// listenToDockerEvents listens to Docker daemon events
 func (m *Monitor) listenToDockerEvents(ctx context.Context) {
-	// Set up event filters - only interested in container events
+	// Set up event filters
 	eventFilters := filters.NewArgs()
 	eventFilters.Add("type", "container")
 	eventFilters.Add("event", "start")
@@ -84,9 +169,8 @@ func (m *Monitor) listenToDockerEvents(ctx context.Context) {
 			return
 		case err := <-errChan:
 			if err != nil {
-				log.Printf("⚠️  Docker event stream error: %v, reconnecting...", err)
+				slog.Warn("Docker event stream error, reconnecting...", "error", err)
 				time.Sleep(5 * time.Second)
-				// Restart event listener
 				go m.listenToDockerEvents(ctx)
 				return
 			}
@@ -106,270 +190,196 @@ func (m *Monitor) handleDockerEvent(ctx context.Context, event events.Message) {
 
 	switch event.Action {
 	case "start":
-		// Container started - add to tracking
-		m.previousContainers[containerID] = containerName
-		log.Printf("▶️  Container started: %s", containerName)
+		slog.Info("Container started", "container", containerName, "id", containerID)
 
-		// Send notification to fnOS clients
-		// Only send "running" state (frontend only responds to "running" and "stopped")
-		if m.interceptor != nil {
-			go func() {
-				time.Sleep(2 * time.Second) // Wait for container to fully start
-				if err := m.interceptor.SendContainerNotification(containerName, "running"); err != nil {
-					// If trim_sac is not available during runtime, it's a critical error
-					// Trigger restart to re-establish connection
-					log.Printf("⚠️  Failed to send running notification for %s: %v", containerName, err)
-					log.Printf("💥 Communication with trim_sac lost, triggering restart...")
-					panic(fmt.Sprintf("failed to communicate with trim_sac: %v", err))
-				}
-			}()
+		// Inspect container to get full labels (event.Actor.Attributes is incomplete)
+		info, err := m.cli.ContainerInspect(ctx, containerID)
+		if err != nil {
+			slog.Debug("Failed to inspect container", "container", containerName, "error", err)
+			return
 		}
 
-		// Rescan to update app list (in case it has exposed ports)
-		m.scanContainers(ctx)
-
-	case "stop", "die", "destroy":
-		// Container stopped - remove from tracking
-		if _, exists := m.previousContainers[containerID]; exists {
-			delete(m.previousContainers, containerID)
-			log.Printf("⏹️  Container stopped: %s", containerName)
-
-			// Send notification to fnOS clients
-			if m.interceptor != nil {
-				if err := m.interceptor.SendContainerNotification(containerName, "stopped"); err != nil {
-					log.Printf("⚠️  Failed to send stopped notification: %v", err)
-				}
-			}
-
-			// Rescan to update app list
-			m.scanContainers(ctx)
+		labels := info.Config.Labels
+		if shouldInstall(labels) {
+			go m.handleContainerStart(ctx, containerID, containerName, labels)
 		}
+
+	case "stop", "die":
+		slog.Info("Container stopped", "container", containerName, "id", containerID)
+		m.handleContainerStop(ctx, containerID, containerName)
+
+	case "destroy":
+		slog.Info("Container destroyed", "container", containerName, "id", containerID)
+		m.handleContainerDestroy(ctx, containerID, containerName)
 	}
 }
 
-// scanContainers scans all running containers and sends updates
-func (m *Monitor) scanContainers(ctx context.Context) {
-	containers, err := m.cli.ContainerList(ctx, container.ListOptions{})
-	if err != nil {
-		log.Printf("[Docker] Error listing containers: %v", err)
+// getAppNameFromLabels extracts appName from labels
+func getAppNameFromLabels(labels map[string]string, containerName string) string {
+	appName := labels["watchcow.appname"]
+	if appName == "" {
+		appName = "watchcow." + containerName
+	}
+	return appName
+}
+
+// shouldInstall checks if a container should be installed as fnOS app
+func shouldInstall(labels map[string]string) bool {
+	// Check watchcow.enable label
+	if labels["watchcow.enable"] != "true" {
+		return false
+	}
+
+	// Check watchcow.install label (default to "fnos" if enable is true)
+	installMode := labels["watchcow.install"]
+	return installMode == "fnos" || installMode == "true" || installMode == ""
+}
+
+// handleContainerStart handles container start event
+func (m *Monitor) handleContainerStart(ctx context.Context, containerID, containerName string, labels map[string]string) {
+	appName := getAppNameFromLabels(labels, containerName)
+
+	// Check if already installed in fnOS
+	if m.installer != nil && m.installer.IsAppInstalled(appName) {
+		// Already installed, just start it
+		slog.Info("App already installed, starting", "app", appName)
+		if err := m.queueOperation("start", appName, ""); err != nil {
+			slog.Warn("Failed to start fnOS app", "app", appName, "error", err)
+		}
+
+		// Track in memory
+		m.mu.Lock()
+		m.containers[containerID] = &ContainerState{
+			ContainerID:   containerID,
+			ContainerName: containerName,
+			AppName:       appName,
+			Installed:     true,
+			Labels:        labels,
+		}
+		m.mu.Unlock()
 		return
 	}
 
-	// Build current state and detect changes
-	currentContainers := make(map[string]string) // map[containerID]containerName
-	var addedContainers []string
-	var removedContainers []string // Will contain container names, not IDs
+	// Not installed yet, generate and install
+	time.Sleep(2 * time.Second)
+
+	config, appDir, err := m.generator.GenerateFromContainer(ctx, containerID)
+	if err != nil {
+		slog.Error("Failed to generate fnOS app", "container", containerName, "error", err)
+		return
+	}
+
+	// Record state
+	m.mu.Lock()
+	m.containers[containerID] = &ContainerState{
+		ContainerID:   containerID,
+		ContainerName: containerName,
+		AppName:       config.AppName,
+		Installed:     false,
+		Labels:        labels,
+	}
+	m.mu.Unlock()
+
+	// Install via queue (serialized)
+	if err := m.queueOperation("install", config.AppName, appDir); err != nil {
+		slog.Error("Failed to install fnOS app", "app", config.AppName, "error", err)
+		return
+	}
+
+	m.mu.Lock()
+	if state, exists := m.containers[containerID]; exists {
+		state.Installed = true
+	}
+	m.mu.Unlock()
+	slog.Info("Successfully installed fnOS app", "app", config.AppName, "container", containerName)
+	m.generator.MarkInstalled(containerID, config)
+}
+
+// handleContainerStop handles container stop event (stop app, keep installed)
+func (m *Monitor) handleContainerStop(ctx context.Context, containerID, containerName string) {
+	m.mu.RLock()
+	state, exists := m.containers[containerID]
+	m.mu.RUnlock()
+
+	if !exists || !state.Installed {
+		return
+	}
+
+	// Stop via queue (serialized)
+	if err := m.queueOperation("stop", state.AppName, ""); err != nil {
+		slog.Warn("Failed to stop fnOS app", "app", state.AppName, "error", err)
+	}
+}
+
+// handleContainerDestroy handles container destroy event (uninstall app)
+func (m *Monitor) handleContainerDestroy(ctx context.Context, containerID, containerName string) {
+	m.mu.RLock()
+	state, exists := m.containers[containerID]
+	m.mu.RUnlock()
+
+	if !exists {
+		return
+	}
+
+	// Uninstall via queue (serialized)
+	if state.Installed {
+		if err := m.queueOperation("uninstall", state.AppName, ""); err != nil {
+			slog.Warn("Failed to uninstall fnOS app", "app", state.AppName, "error", err)
+		}
+	}
+
+	// Remove from tracking
+	m.mu.Lock()
+	delete(m.containers, containerID)
+	m.mu.Unlock()
+	m.generator.MarkUninstalled(containerID)
+}
+
+// scanContainers scans all running containers
+func (m *Monitor) scanContainers(ctx context.Context) {
+	containers, err := m.cli.ContainerList(ctx, container.ListOptions{})
+	if err != nil {
+		slog.Error("Failed to list containers", "error", err)
+		return
+	}
+
+	slog.Info("Scanning existing containers...", "count", len(containers))
 
 	for _, ctr := range containers {
 		containerID := ctr.ID[:12]
-		name := strings.TrimPrefix(ctr.Names[0], "/")
-		currentContainers[containerID] = name
+		containerName := strings.TrimPrefix(ctr.Names[0], "/")
 
-		// Check if this is a new container
-		if _, exists := m.previousContainers[containerID]; !exists {
-			addedContainers = append(addedContainers, name)
-		}
-	}
-
-	// Check for removed containers
-	for oldID, oldName := range m.previousContainers {
-		if _, exists := currentContainers[oldID]; !exists {
-			removedContainers = append(removedContainers, oldName)
-		}
-	}
-
-	// Update previous state
-	m.previousContainers = currentContainers
-
-	// Convert to apps
-	apps := make([]interceptor.AppInfo, 0)
-	skippedCount := 0
-	for _, ctr := range containers {
-		app := m.containerToAppInfo(&ctr)
-		if app != nil {
-			apps = append(apps, *app)
-		} else {
-			skippedCount++
-		}
-	}
-
-	// Send update to app list
-	select {
-	case m.updateCh <- apps:
-	default:
-		log.Println("⚠️  Update channel full, skipping")
-	}
-
-	// Send notifications for newly discovered containers (e.g., on initial scan)
-	// If trim_sac is not ready, the container will restart and retry
-	for _, containerName := range addedContainers {
-		if m.interceptor != nil {
-			if err := m.interceptor.SendContainerNotification(containerName, "running"); err != nil {
-				// trim_sac process not ready yet
-				// Let Docker restart this container to retry
-				log.Printf("⚠️  Failed to send notification for %s: %v", containerName, err)
-				log.Printf("💥 trim_sac not ready, triggering restart to retry...")
-				panic(fmt.Sprintf("trim_sac process not available: %v", err))
-			}
-			log.Printf("✅ Sent initial notification for container: %s", containerName)
+		// Check if should be installed
+		if shouldInstall(ctr.Labels) {
+			slog.Info("Found container to install", "container", containerName)
+			go m.handleContainerStart(ctx, containerID, containerName, ctr.Labels)
 		}
 	}
 }
 
-// containerToAppInfo converts a Docker container to AppInfo
-func (m *Monitor) containerToAppInfo(ctr *container.Summary) *interceptor.AppInfo {
-	// Check if WatchCow is enabled for this container
-	if ctr.Labels["watchcow.enable"] != "true" {
-		// Skip containers without watchcow.enable=true
-		return nil
+// GetContainerStates returns all monitored container states
+func (m *Monitor) GetContainerStates() map[string]*ContainerState {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	result := make(map[string]*ContainerState)
+	for k, v := range m.containers {
+		result[k] = v
 	}
-
-	// Extract container name (remove leading /)
-	name := strings.TrimPrefix(ctr.Names[0], "/")
-
-	// Read all watchcow labels with fallbacks
-	appName := getLabel(ctr.Labels, "watchcow.appName", fmt.Sprintf("docker-%s", name))
-	appID := getLabel(ctr.Labels, "watchcow.appID", ctr.ID[:12])
-	entryName := getLabel(ctr.Labels, "watchcow.entryName", appName)
-	title := getLabel(ctr.Labels, "watchcow.title", prettifyName(name))
-	desc := getLabel(ctr.Labels, "watchcow.desc", fmt.Sprintf("Docker: %s", ctr.Image))
-	icon := getLabel(ctr.Labels, "watchcow.icon", guessIcon(ctr.Image))
-	category := getLabel(ctr.Labels, "watchcow.category", "Docker")
-
-	// Network configuration
-	protocol := getLabel(ctr.Labels, "watchcow.protocol", "http")
-	host := getLabel(ctr.Labels, "watchcow.host", "")
-	port := getLabel(ctr.Labels, "watchcow.port", "")
-	path := getLabel(ctr.Labels, "watchcow.path", "/")
-	fnDomain := getLabel(ctr.Labels, "watchcow.fnDomain", fmt.Sprintf("docker-%s", name))
-
-	// If port not specified in label, try to get from container ports
-	if port == "" {
-		port = getFirstPublicPort(ctr)
-		if port == "" {
-			// No port found, skip this container
-			return nil
-		}
-	}
-
-	// App type flags (parse as boolean)
-	microApp := getBoolLabel(ctr.Labels, "watchcow.microApp", false)
-	nativeApp := getBoolLabel(ctr.Labels, "watchcow.nativeApp", false)
-	isDisplay := getBoolLabel(ctr.Labels, "watchcow.isDisplay", true)
-
-	// Build app info
-	app := &interceptor.AppInfo{
-		AppName:   appName,
-		AppID:     appID,
-		EntryName: entryName,
-		Title:     title,
-		Desc:      desc,
-		Icon:      icon,
-		Type:      "url",
-		URI: map[string]interface{}{
-			"protocol": protocol,
-			"host":     host,
-			"port":     port,
-			"path":     path,
-			"fnDomain": fnDomain,
-		},
-		MicroApp:  microApp,
-		NativeApp: nativeApp,
-		FullURL:   "",
-		Status:    "running",
-		FileTypes: []string{},
-		IsDisplay: isDisplay,
-		Category:  category,
-	}
-
-	return app
-}
-
-// getLabel gets a label value with fallback
-func getLabel(labels map[string]string, key, fallback string) string {
-	if val, ok := labels[key]; ok && val != "" {
-		return val
-	}
-	return fallback
-}
-
-// getBoolLabel gets a boolean label value with fallback
-func getBoolLabel(labels map[string]string, key string, fallback bool) bool {
-	if val, ok := labels[key]; ok {
-		return val == "true" || val == "1" || val == "yes"
-	}
-	return fallback
-}
-
-// getFirstPublicPort gets the first public port from container
-func getFirstPublicPort(ctr *container.Summary) string {
-	for _, port := range ctr.Ports {
-		if port.PublicPort > 0 {
-			return strconv.Itoa(int(port.PublicPort))
-		}
-	}
-	return ""
-}
-
-// guessIcon tries to guess an appropriate icon URL based on image name
-func guessIcon(image string) string {
-	// Extract base image name
-	parts := strings.Split(image, "/")
-	imageName := parts[len(parts)-1]
-	imageName = strings.Split(imageName, ":")[0]
-
-	// Map common images to dashboard-icons
-	iconMap := map[string]string{
-		"jellyfin":   "jellyfin",
-		"portainer":  "portainer",
-		"nginx":      "nginx",
-		"postgres":   "postgresql",
-		"mysql":      "mysql",
-		"redis":      "redis",
-		"mongodb":    "mongodb",
-		"plex":       "plex",
-		"sonarr":     "sonarr",
-		"radarr":     "radarr",
-		"traefik":    "traefik",
-		"grafana":    "grafana",
-		"prometheus": "prometheus",
-	}
-
-	if iconName, ok := iconMap[imageName]; ok {
-		return fmt.Sprintf("https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/%s.png", iconName)
-	}
-
-	// Default Docker icon
-	return "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/docker.png"
-}
-
-// prettifyName converts container name to a nice title
-func prettifyName(name string) string {
-	// Remove common suffixes
-	name = strings.TrimSuffix(name, "-1")
-	name = strings.TrimSuffix(name, "_1")
-
-	// Replace underscores and hyphens with spaces
-	name = strings.ReplaceAll(name, "_", " ")
-	name = strings.ReplaceAll(name, "-", " ")
-
-	// Capitalize first letter of each word
-	words := strings.Fields(name)
-	for i, word := range words {
-		if len(word) > 0 {
-			words[i] = strings.ToUpper(word[:1]) + word[1:]
-		}
-	}
-
-	return strings.Join(words, " ")
+	return result
 }
 
 // Stop stops the monitor
 func (m *Monitor) Stop() {
 	close(m.stopCh)
+
+	if m.generator != nil {
+		m.generator.Close()
+	}
+
 	if m.cli != nil {
 		if err := m.cli.Close(); err != nil {
-			log.Printf("⚠️  Error closing Docker client: %v", err)
+			slog.Warn("Error closing Docker client", "error", err)
 		}
 	}
 }

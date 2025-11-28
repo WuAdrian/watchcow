@@ -3,8 +3,8 @@ module watchcow
 go 1.25.0
 
 require (
-	github.com/cilium/ebpf v0.20.0
 	github.com/docker/docker v28.5.2+incompatible
+	golang.org/x/image v0.33.0
 )
 
 require (
