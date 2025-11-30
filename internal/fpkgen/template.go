@@ -110,6 +110,7 @@ type TemplateData struct {
 	Port     string
 	Path     string
 	UIType   string
+	AllUsers bool
 
 	// Collections
 	Ports       []string
@@ -136,6 +137,7 @@ func NewTemplateData(config *AppConfig) *TemplateData {
 		Port:          config.Port,
 		Path:          config.Path,
 		UIType:        config.UIType,
+		AllUsers:      config.AllUsers,
 		Volumes:       config.Volumes,
 		Environment:   config.Environment,
 		RestartPolicy: config.RestartPolicy,

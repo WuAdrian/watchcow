@@ -19,6 +19,7 @@ type AppConfig struct {
 	Port     string // service_port
 	Path     string // URL path
 	UIType   string // "url" (new tab) or "iframe" (desktop window)
+	AllUsers bool   // true = all users can access, false = admin only
 
 	// Volumes
 	Volumes []VolumeMapping

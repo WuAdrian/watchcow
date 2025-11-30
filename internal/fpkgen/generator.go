@@ -181,6 +181,7 @@ func (g *Generator) extractConfig(container *dockercontainer.InspectResponse) *A
 		Port:          getLabel(labels, "watchcow.service_port", ""),
 		Path:          getLabel(labels, "watchcow.path", "/"),
 		UIType:        getLabel(labels, "watchcow.ui_type", "url"),
+		AllUsers:      getLabel(labels, "watchcow.all_users", "true") == "true",
 		Icon:          getLabel(labels, "watchcow.icon", guessIcon(container.Config.Image)),
 		Environment:   filterEnvironment(container.Config.Env),
 		Labels:        labels,

@@ -91,6 +91,7 @@ services:
 | `watchcow.protocol` | 否 | `http` | 协议 (`http`/`https`) |
 | `watchcow.path` | 否 | `/` | URL 路径 |
 | `watchcow.ui_type` | 否 | `url` | UI 类型 (`url` 新标签页 / `iframe` 桌面窗口) |
+| `watchcow.all_users` | 否 | `true` | 访问权限 (`true` 所有用户 / `false` 仅管理员) |
 | `watchcow.icon` | 否 | 自动猜测 | 图标 URL 或 `file://` 本地路径 |
 
 ### 图标配置
