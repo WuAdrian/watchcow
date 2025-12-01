@@ -251,8 +251,8 @@ func NewTemplateData(config *AppConfig) *TemplateData {
 	}
 
 	// Convert entries to template data
-	var firstEntryFullName string
-	for i, entry := range config.Entries {
+	var defaultLaunchEntry string
+	for _, entry := range config.Entries {
 		// Generate icon filename: "icon_{0}.png" for default, "icon_<name>_{0}.png" for named
 		iconFilename := "icon_{0}.png"
 		if entry.Name != "" {
@@ -304,14 +304,14 @@ func NewTemplateData(config *AppConfig) *TemplateData {
 			Control:   controlData,
 		})
 
-		// Track first entry for default launch entry
-		if i == 0 {
-			firstEntryFullName = fullName
+		// Track first displayable entry for default launch entry
+		if defaultLaunchEntry == "" && !entry.NoDisplay {
+			defaultLaunchEntry = fullName
 		}
 	}
 
-	// Set default launch entry to first entry's full name
-	data.DefaultLaunchEntry = firstEntryFullName
+	// Set default launch entry to first displayable entry's full name
+	data.DefaultLaunchEntry = defaultLaunchEntry
 
 	return data
 }

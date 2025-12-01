@@ -411,7 +411,7 @@ func TestGenerateUIConfigJSON(t *testing.T) {
 
 // TestTemplateData_DefaultLaunchEntry tests DefaultLaunchEntry is set correctly
 func TestTemplateData_DefaultLaunchEntry(t *testing.T) {
-	// Test with default entry
+	// Test with default entry (displayable)
 	config1 := &AppConfig{
 		AppName: "watchcow.app1",
 		Entries: []Entry{
@@ -433,9 +433,37 @@ func TestTemplateData_DefaultLaunchEntry(t *testing.T) {
 		},
 	}
 	data2 := NewTemplateData(config2)
-	// Should use first entry's full name
+	// Should use first displayable entry's full name
 	if data2.DefaultLaunchEntry != "watchcow.app2.main" {
 		t.Errorf("with only named entries, DefaultLaunchEntry should be 'watchcow.app2.main', got %q", data2.DefaultLaunchEntry)
+	}
+
+	// Test with first entry having NoDisplay=true
+	config3 := &AppConfig{
+		AppName: "watchcow.app3",
+		Entries: []Entry{
+			{Name: "api", Title: "API", Port: "8080", NoDisplay: true},
+			{Name: "web", Title: "Web", Port: "8081", NoDisplay: false},
+		},
+	}
+	data3 := NewTemplateData(config3)
+	// Should skip first entry (NoDisplay=true) and use second entry
+	if data3.DefaultLaunchEntry != "watchcow.app3.web" {
+		t.Errorf("should skip NoDisplay entry, DefaultLaunchEntry should be 'watchcow.app3.web', got %q", data3.DefaultLaunchEntry)
+	}
+
+	// Test with all entries having NoDisplay=true
+	config4 := &AppConfig{
+		AppName: "watchcow.app4",
+		Entries: []Entry{
+			{Name: "api", Title: "API", Port: "8080", NoDisplay: true},
+			{Name: "hook", Title: "Hook", Port: "8081", NoDisplay: true},
+		},
+	}
+	data4 := NewTemplateData(config4)
+	// Should be empty when no displayable entries
+	if data4.DefaultLaunchEntry != "" {
+		t.Errorf("with all NoDisplay=true, DefaultLaunchEntry should be empty, got %q", data4.DefaultLaunchEntry)
 	}
 }
 
