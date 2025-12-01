@@ -5,22 +5,22 @@ configs:
     content: |
       #!/bin/sh
       # 根据 query string 匹配跳转目标
-      case "$QUERY_STRING" in
+      case "$$QUERY_STRING" in
         bilibili) URL="https://www.bilibili.com/" ;;
         github)   URL="https://github.com/" ;;
         youtube)  URL="https://www.youtube.com/" ;;
         *)        URL="" ;;
       esac
 
-      if [ -n "$URL" ]; then
+      if [ -n "$$URL" ]; then
         echo "Status: 302 Found"
-        echo "Location: $URL"
+        echo "Location: $$URL"
         echo ""
       else
         echo "Status: 404 Not Found"
         echo "Content-Type: text/plain"
         echo ""
-        echo "Bookmark not found: $QUERY_STRING"
+        echo "Bookmark not found: $$QUERY_STRING"
       fi
 
 services:
@@ -28,12 +28,12 @@ services:
     image: busybox:uclibc
     container_name: bookmark
     ports:
-      - "3000:3000"
+      - "3001:3001"
     configs:
       - source: redirect
         target: /www/cgi-bin/index.cgi
         mode: 0755
-    command: httpd -f -p 3000 -h /www
+    command: httpd -f -p 3001 -h /www
     restart: unless-stopped
     stop_signal: SIGKILL
     network_mode: bridge
