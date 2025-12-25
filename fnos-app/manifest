@@ -1,11 +1,13 @@
-appname      = watchcow
-version      = 1.0.0
-display_name = WatchCow
-desc         = Docker 容器自动转换为 fnOS 应用 - 监控 Docker 容器并自动生成官方 fnOS 应用包
-arch         = x86_64
-source       = thirdparty
-maintainer   = WatchCow
-distributor  = WatchCow
+appname         = watchcow
+version         = 1.0.0
+display_name    = WatchCow
+desc            = Docker 容器自动转换为 fnOS 应用 - 监控 Docker 容器并自动生成官方 fnOS 应用包, WatchCow 在运行时处于 Root 权限下, 同时会读取 Docker 信息, 仓库开源地址: <a>https://github.com/tf4fun/watchcow</a>
+arch            = x86_64
+source          = thirdparty
+maintainer      = tf4fun
+maintainer_url  = https://github.com/tf4fun
+distributor     = tf4fun
+distributor_url = https://github.com/tf4fun
 
 ctl_stop     = true
 checkport    = false
