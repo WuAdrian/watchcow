@@ -47,14 +47,14 @@ services:
       watchcow.bilibili.service_port: "3001"
       watchcow.bilibili.path: "/cgi-bin/index.cgi?bilibili"
       watchcow.bilibili.title: "哔哩哔哩"
-      watchcow.bilibili.icon: "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/bilibili.png"
+      watchcow.bilibili.icon: "file://./icons/bilibili.png"
 
       watchcow.github.service_port: "3001"
       watchcow.github.path: "/cgi-bin/index.cgi?github"
       watchcow.github.title: "GitHub"
-      watchcow.github.icon: "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/github.png"
+      watchcow.github.icon: "file://./icons/github.webp"
 
       watchcow.youtube.service_port: "3001"
       watchcow.youtube.path: "/cgi-bin/index.cgi?youtube"
       watchcow.youtube.title: "YouTube"
-      watchcow.youtube.icon: "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/youtube.png"
+      watchcow.youtube.icon: "file://./icons//youtube.ico"

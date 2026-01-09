@@ -1,6 +1,7 @@
 /.idea
 /references
 /.claude
+/.kiro
 
 # Binaries for programs and plugins
 *.exe

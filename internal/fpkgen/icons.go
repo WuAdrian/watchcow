@@ -14,6 +14,12 @@ import (
 	"time"
 
 	xdraw "golang.org/x/image/draw"
+
+	// Register image format decoders for multi-format support
+	_ "image/jpeg"
+
+	_ "golang.org/x/image/bmp"
+	_ "golang.org/x/image/webp"
 )
 
 //go:embed defaults/ICON.PNG defaults/ICON_256.PNG
@@ -23,9 +29,12 @@ var defaultIcons embed.FS
 func (g *Generator) handleIcons(appDir string, config *AppConfig) error {
 	var defaultIcon image.Image
 
+	// Get base path from container labels for resolving relative file:// paths
+	basePath := getBasePath(config.Labels)
+
 	// Process each entry's icon
 	for _, entry := range config.Entries {
-		entryIcon, err := loadIconFromSource(entry.Icon)
+		entryIcon, err := loadIconFromSource(entry.Icon, basePath)
 		if err != nil {
 			fmt.Printf("Warning: Failed to load icon for entry '%s': %v\n", entry.Name, err)
 		}
@@ -89,7 +98,7 @@ func (g *Generator) handleIcons(appDir string, config *AppConfig) error {
 		if !hasDefaultEntry {
 			// Use first entry's icon for root icons
 			firstEntry := config.Entries[0]
-			entryIcon, _ := loadIconFromSource(firstEntry.Icon)
+			entryIcon, _ := loadIconFromSource(firstEntry.Icon, basePath)
 			if entryIcon == nil {
 				if defaultIcon == nil {
 					defaultIcon, _ = loadDefaultIcon()
@@ -107,15 +116,51 @@ func (g *Generator) handleIcons(appDir string, config *AppConfig) error {
 	return nil
 }
 
+// getBasePath extracts the compose working directory from container labels
+// Returns empty string if the label is not present
+func getBasePath(labels map[string]string) string {
+	// Docker Compose automatically adds this label
+	if dir, ok := labels["com.docker.compose.project.working_dir"]; ok {
+		return dir
+	}
+	return "" // Empty string indicates relative paths cannot be resolved
+}
+
+// resolveFilePath resolves a file:// URL path to an absolute filesystem path
+// basePath: the base directory for resolving relative paths (compose working directory)
+// Supports:
+// - Absolute paths: file:///path/to/file -> /path/to/file
+// - Relative paths: file://./icon.png -> basePath/./icon.png
+// - Parent paths: file://../icon.png -> basePath/../icon.png
+func resolveFilePath(fileURL string, basePath string) (string, error) {
+	path := strings.TrimPrefix(fileURL, "file://")
+
+	// Absolute path: starts with /
+	if filepath.IsAbs(path) {
+		return path, nil
+	}
+
+	// Relative path: requires basePath
+	if basePath == "" {
+		return "", fmt.Errorf("relative path requires base path from compose working directory")
+	}
+
+	return filepath.Join(basePath, path), nil
+}
+
 // loadIconFromSource loads an icon from URL or local file path
-func loadIconFromSource(iconSource string) (image.Image, error) {
+// basePath: the base directory for resolving relative file:// paths (compose working directory)
+func loadIconFromSource(iconSource string, basePath string) (image.Image, error) {
 	if iconSource == "" {
 		return nil, fmt.Errorf("empty icon source")
 	}
 
 	if strings.HasPrefix(iconSource, "file://") {
-		// Load from local file path
-		localPath := strings.TrimPrefix(iconSource, "file://")
+		// Resolve file:// path (supports both absolute and relative paths)
+		localPath, err := resolveFilePath(iconSource, basePath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to resolve file path: %w", err)
+		}
 		return loadLocalIcon(localPath)
 	} else if strings.HasPrefix(iconSource, "http") {
 		// Download from URL
@@ -141,21 +186,41 @@ func loadDefaultIcon() (image.Image, error) {
 }
 
 // loadLocalIcon loads an icon from local file path
+// Supports multiple formats: PNG, JPEG, WebP, BMP, ICO
 func loadLocalIcon(path string) (image.Image, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read file: %w", err)
+		return nil, fmt.Errorf("file not found: %s", path)
+	}
+
+	// Detect format using magic bytes
+	format := detectFormat(data)
+
+	// For ICO format, use custom decoder
+	if format == FormatICO {
+		img, err := decodeICO(data)
+		if err != nil {
+			return nil, fmt.Errorf("failed to decode ICO image: %w", err)
+		}
+		return img, nil
+	}
+
+	// For other formats (PNG, JPEG, WebP, BMP), use standard image.Decode
+	// The decoders are registered via imports at the top of this file
+	if format == FormatUnknown {
+		return nil, fmt.Errorf("unsupported image format: detected %s", format)
 	}
 
 	img, _, err := image.Decode(bytes.NewReader(data))
 	if err != nil {
-		return nil, fmt.Errorf("failed to decode image: %w", err)
+		return nil, fmt.Errorf("failed to decode %s image: %w", format, err)
 	}
 
 	return img, nil
 }
 
 // downloadIcon downloads an icon from URL
+// Supports multiple formats: PNG, JPEG, WebP, BMP, ICO
 func downloadIcon(url string) (image.Image, error) {
 	client := &http.Client{
 		Timeout: 60 * time.Second,
@@ -177,10 +242,26 @@ func downloadIcon(url string) (image.Image, error) {
 		return nil, err
 	}
 
-	// Decode the image
+	// Detect format using magic bytes
+	format := detectFormat(body)
+
+	// For ICO format, use custom decoder
+	if format == FormatICO {
+		img, err := decodeICO(body)
+		if err != nil {
+			return nil, fmt.Errorf("failed to decode ICO image: %w", err)
+		}
+		return img, nil
+	}
+
+	// For other formats (PNG, JPEG, WebP, BMP), use standard image.Decode
+	if format == FormatUnknown {
+		return nil, fmt.Errorf("unsupported image format: detected %s", format)
+	}
+
 	img, _, err := image.Decode(bytes.NewReader(body))
 	if err != nil {
-		return nil, fmt.Errorf("failed to decode image: %w", err)
+		return nil, fmt.Errorf("failed to decode %s image: %w", format, err)
 	}
 
 	return img, nil
