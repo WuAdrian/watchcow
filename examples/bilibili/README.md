@@ -11,9 +11,6 @@
 ```bash
 cd examples/bilibili
 
-# 给脚本执行权限
-chmod +x redirect.sh
-
 # 启动容器
 docker compose up -d
 ```
@@ -24,16 +21,7 @@ docker compose up -d
 
 | 文件 | 说明 |
 |------|------|
-| `redirect.sh` | CGI 脚本，返回 302 重定向响应 |
-| `compose.yaml` | Docker Compose 配置 + WatchCow labels |
-
-## 自定义跳转目标
-
-编辑 `redirect.sh` 中的 `Location` 行：
-
-```sh
-echo "Location: https://your-target-url.com/"
-```
+| `compose.yaml` | Docker Compose 配置，包含 CGI 脚本和 WatchCow labels |
 
 ## 验证
 
