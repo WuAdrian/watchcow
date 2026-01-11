@@ -219,7 +219,7 @@ func (g *Generator) extractConfig(container *dockercontainer.InspectResponse) *A
 			AllUsers:  config.AllUsers,
 			Icon:      defaultIcon,
 			FileTypes: nil,
-			NoDisplay: false,
+			NoDisplay: getLabel(labels, "watchcow.no_display", "false") == "true",
 			Control:   nil,
 		}}
 	}
