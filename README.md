@@ -84,8 +84,8 @@ services:
 | 标签 | 必需 | 默认值 | 说明 |
 |------|------|--------|------|
 | `watchcow.enable` | 是 | - | 设为 `"true"` 启用 |
-| `watchcow.appname` | 否 | `watchcow.<容器名>` | 应用唯一标识 |
-| `watchcow.display_name` | 否 | 容器名 | 应用显示名称（manifest） |
+| `watchcow.appname` | 否 | `watchcow.<容器名>` | 应用唯一标识（不得含有空格） |
+| `watchcow.display_name` | 否 | 容器名 | 桌面及应用商店中的显示名称 |
 | `watchcow.desc` | 否 | 镜像名 | 应用描述 |
 | `watchcow.version` | 否 | `1.0.0` | 应用版本 |
 | `watchcow.maintainer` | 否 | `WatchCow` | 维护者 |
